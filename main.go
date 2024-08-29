@@ -57,7 +57,7 @@ var (
 	spinnerStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
 	errorStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
 	grayStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("7"))
-	testStyle    = lipgloss.NewStyle().Width(3).Align(lipgloss.Right)
+	testStyle    lipgloss.Style
 )
 
 func getTestFiles(dir string) ([]string, error) {
@@ -103,10 +103,16 @@ func initialModel(dir string) model {
 	}
 
 	var testCases []testInfo
+	var longestName int
 	for i, file := range testFiles {
 		file = file[:len(file)-3]
+		if len(file) > longestName {
+			longestName = len(file)
+		}
 		testCases = append(testCases, testInfo{id: i, name: file, resolved: false, state: TestStateWaiting, stopwatch: stopwatch.NewWithInterval(time.Millisecond * 31)})
 	}
+
+	testStyle = lipgloss.NewStyle().Width(longestName).Align(lipgloss.Right)
 
 	return model{makefileDir: filepath.Dir(makefile), directory: dir, spinner: s, testCases: testCases}
 }
