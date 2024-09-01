@@ -32,11 +32,11 @@ func makeDependencies(ctx context.Context, dir string) tea.Cmd {
 		e.Stderr = &output
 		err := e.Run()
 		if err != nil {
-			return errMsg{err: fmt.Errorf("make error: %w\n%s", err,
+			return errMsg{err: fmt.Errorf("make error: %w\n%s\n\n(Using makefile at: %s)", err,
 				lipgloss.NewStyle().
 					MarginLeft(2).
 					BorderStyle(lipgloss.NormalBorder()).BorderLeft(true).
-					Render(output.String()))}
+					Render(output.String()), dir)}
 		} else {
 			return startBuildingTests{}
 		}

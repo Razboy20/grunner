@@ -61,19 +61,36 @@ func initialModel(files []string, maxThreads, iterations int, timeCap float64) m
 	s2 := spinner.New()
 	s2.Spinner = spinner.Line
 
+	ctx, cancel := context.WithCancel(context.Background())
+
+	model := model{
+		spinner:      s,
+		smallSpinner: s2,
+
+		maxThreads: maxThreads,
+		timeCap:    time.Duration(timeCap) * time.Second,
+
+		context:   ctx,
+		cancelCtx: cancel,
+		window:    struct{ width, height int }{80, 24}, // set some defaults
+	}
+
 	testFiles, err := findTestFiles(files)
 	if err != nil {
-		return model{spinner: s, err: err}
+		model.err = err
+		return model
 	}
 	if (len(testFiles)) == 0 {
-		return model{spinner: s, err: fmt.Errorf("no test files found")}
+		model.err = fmt.Errorf("no test files found")
+		return model
 	}
 
 	// assumption is that any tests to run would be within the same Makefile project
 	dir := filepath.Dir(testFiles[0])
 	makefile, err := findMakefile(dir)
 	if err != nil {
-		return model{spinner: s, err: err}
+		model.err = err
+		return model
 	}
 
 	var testCases []testInfo
@@ -101,22 +118,11 @@ func initialModel(files []string, maxThreads, iterations int, timeCap float64) m
 
 	testStyle = lipgloss.NewStyle().Width(longestName).Align(lipgloss.Right)
 
-	ctx, cancel := context.WithCancel(context.Background())
+	model.testCases = testCases
+	model.makefileDir = filepath.Dir(makefile)
+	model.directory = dir
 
-	return model{
-		spinner:      s,
-		smallSpinner: s2,
-		testCases:    testCases,
-
-		maxThreads:  maxThreads,
-		timeCap:     time.Duration(timeCap) * time.Second,
-		makefileDir: filepath.Dir(makefile),
-		directory:   dir,
-
-		window:    struct{ width, height int }{80, 24}, // set some defaults
-		context:   ctx,
-		cancelCtx: cancel,
-	}
+	return model
 }
 
 func (m model) Init() tea.Cmd {
@@ -154,7 +160,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case errMsg:
-		m.err = msg
+		if m.err == nil {
+			m.err = msg.err
+		}
 		m.cancelCtx()
 		return m, delayCmd(time.Millisecond, tea.Quit)
 
@@ -264,7 +272,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m model) View() string {
 	if m.err != nil {
-		return errorStyle.Render("Error: " + m.err.Error())
+		return errorStyle.Render("Error: " + m.err.Error() + "\n")
 	}
 
 	var isFinished bool
@@ -400,9 +408,11 @@ func main() {
 	}
 
 	if flags.MaxThreads > runtime.NumCPU() {
+		fmt.Println(errorStyle.Render("WARNING: Number of threads is higher than the number of CPUs. Setting to max CPUs."))
 		flags.MaxThreads = runtime.NumCPU()
-	}
-	if flags.MaxThreads < 1 {
+	} else if flags.MaxThreads > runtime.NumCPU()/4 {
+		fmt.Println(errorStyle.Render("WARNING: Number of threads is higher than recommended. You may experience issues."))
+	} else if flags.MaxThreads < 1 {
 		fmt.Println(errorStyle.Render("Invalid number of threads."))
 		os.Exit(1)
 	}
@@ -422,5 +432,5 @@ func printHelp() {
 	fmt.Println("  -n, --iterations int   number of iterations to execute (default 1)")
 	fmt.Println("  -c, --timecap float    cap total execution time to n seconds (useful with -n) (default 1000)")
 	fmt.Println("  -T, --threads int      maximum number of concurrent threads to use (default max(CPUThreads/4-1, 2))")
-	fmt.Println("(gRunner version 1.2.0)")
+	fmt.Println("(gRunner version 1.2.1)")
 }
