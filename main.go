@@ -4,8 +4,7 @@ package main
 // component library.
 
 import (
-	"cmp"
-	"flag"
+	"context"
 	"fmt"
 	"grunner/stopwatch"
 	"os"
@@ -17,6 +16,7 @@ import (
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/fred1268/go-clap/clap"
 )
 
 type errMsg struct{ err error }
@@ -30,13 +30,16 @@ type model struct {
 
 	// settings
 	maxThreads  int
+	timeCap     time.Duration
 	makefileDir string
 	directory   string
 
 	// tui data
-	window   struct{ width, height int }
-	quitting bool
-	err      error
+	window    struct{ width, height int }
+	quitting  bool
+	context   context.Context
+	cancelCtx context.CancelFunc
+	err       error
 }
 
 var (
@@ -50,7 +53,7 @@ var (
 	testStyle    lipgloss.Style
 )
 
-func initialModel(dir string, maxThreads int, iterations int) model {
+func initialModel(files []string, maxThreads, iterations int, timeCap float64) model {
 	s := spinner.New()
 	s.Spinner = spinner.MiniDot
 	s.Style = spinnerStyle
@@ -58,7 +61,7 @@ func initialModel(dir string, maxThreads int, iterations int) model {
 	s2 := spinner.New()
 	s2.Spinner = spinner.Line
 
-	testFiles, err := getTestFiles(dir)
+	testFiles, err := findTestFiles(files)
 	if err != nil {
 		return model{spinner: s, err: err}
 	}
@@ -66,6 +69,8 @@ func initialModel(dir string, maxThreads int, iterations int) model {
 		return model{spinner: s, err: fmt.Errorf("no test files found")}
 	}
 
+	// assumption is that any tests to run would be within the same Makefile project
+	dir := filepath.Dir(testFiles[0])
 	makefile, err := findMakefile(dir)
 	if err != nil {
 		return model{spinner: s, err: err}
@@ -74,7 +79,7 @@ func initialModel(dir string, maxThreads int, iterations int) model {
 	var testCases []testInfo
 	var longestName int
 	for i, file := range testFiles {
-		file = file[:len(file)-3]
+		file = file[:len(file)-len(TEST_EXT)]
 		if len(file) > longestName {
 			longestName = len(file)
 		}
@@ -87,6 +92,7 @@ func initialModel(dir string, maxThreads int, iterations int) model {
 		testCases = append(testCases, testInfo{id: i,
 			name:       file,
 			resolved:   false,
+			running:    false,
 			state:      TestStateWaiting,
 			iterations: tIterations,
 			stopwatch:  stopwatch.NewWithInterval(time.Millisecond * 31),
@@ -95,19 +101,29 @@ func initialModel(dir string, maxThreads int, iterations int) model {
 
 	testStyle = lipgloss.NewStyle().Width(longestName).Align(lipgloss.Right)
 
+	ctx, cancel := context.WithCancel(context.Background())
+
+	fmt.Println("timecaporig:", timeCap)
+	fmt.Println("timecap:", time.Duration(timeCap)*time.Second)
+
 	return model{
-		makefileDir:  filepath.Dir(makefile),
-		directory:    dir,
 		spinner:      s,
 		smallSpinner: s2,
 		testCases:    testCases,
-		window:       struct{ width, height int }{80, 24}, // set some defaults
-		maxThreads:   maxThreads,
+
+		maxThreads:  maxThreads,
+		timeCap:     time.Duration(timeCap) * time.Second,
+		makefileDir: filepath.Dir(makefile),
+		directory:   dir,
+
+		window:    struct{ width, height int }{80, 24}, // set some defaults
+		context:   ctx,
+		cancelCtx: cancel,
 	}
 }
 
 func (m model) Init() tea.Cmd {
-	return tea.Batch(m.spinner.Tick, m.smallSpinner.Tick, makeDependencies(m.makefileDir))
+	return tea.Batch(m.spinner.Tick, m.smallSpinner.Tick, makeDependencies(m.context, m.makefileDir))
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -116,11 +132,25 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds []tea.Cmd
 	)
 
+	resolveTestCase := func(test *testInfo) {
+		test.resolved = true
+		test.running = false
+
+		test.iterations = test.iterations[:test.currIter+1]
+
+		cmds = append(cmds, tryStartExecutors(m))
+	}
+
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "q", "esc", "ctrl+c":
+			if m.quitting {
+				// forcibly quit
+				os.Exit(1)
+			}
 			m.quitting = true
+			m.cancelCtx()
 			return m, delayCmd(time.Millisecond, tea.Quit)
 		default:
 			return m, nil
@@ -128,6 +158,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case errMsg:
 		m.err = msg
+		m.cancelCtx()
 		return m, delayCmd(time.Millisecond, tea.Quit)
 
 	case startBuildingTests:
@@ -136,19 +167,19 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		for _, testId := range msg {
 			test := &m.testCases[testId]
 			test.state = TestStateBuilding
-			cmds = append(cmds, buildTestCase(m.makefileDir, *test))
+			test.running = true
+			cmds = append(cmds, buildTestCase(m.context, m.makefileDir, *test))
 		}
 	case testBuildErr:
 		m.testCases[msg.int].state = TestStateCompileFailure
-		m.testCases[msg.int].resolved = true
-		cmds = append(cmds, tryStartExecutors(m))
+		resolveTestCase(&m.testCases[msg.int])
 		m.testCases[msg.int].err = msg.err
 	case testBuildSuccess:
 		test := &m.testCases[msg]
 		test.state = TestStateRunning
 		test.iterations[test.currIter].startTime = time.Now()
 		cmds = append(cmds, test.stopwatch.Start())
-		cmds = append(cmds, runTestCase(m.makefileDir, *test))
+		cmds = append(cmds, runTestCase(m.context, m.makefileDir, *test))
 
 	case testRunError:
 		test := &m.testCases[msg.int]
@@ -159,17 +190,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		test.iterations[test.currIter].timeSpanned = timeDiff(test.iterations[test.currIter].startTime, currTime)
 		cmds = append(cmds, test.stopwatch.Stop())
 
-		if test.currIter == len(test.iterations)-1 {
+		if test.currIter == len(test.iterations)-1 || test.TimeElapsed() > m.timeCap {
 			// all iterations have been run
-			test.resolved = true
-			cmds = append(cmds, tryStartExecutors(m))
+			resolveTestCase(test)
 			test.err = msg.err
 			//cmds = append(cmds, test.stopwatch.Stop())
 		} else {
 			// run the next iteration
 			test.currIter++
 			test.iterations[test.currIter].startTime = time.Now()
-			cmds = append(cmds, runTestCase(m.makefileDir, *test))
+			cmds = append(cmds, runTestCase(m.context, m.makefileDir, *test))
 		}
 	case testRunSuccess:
 		test := &m.testCases[msg]
@@ -179,11 +209,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		test.iterations[test.currIter].timeSpanned = timeDiff(test.iterations[test.currIter].startTime, currTime)
 		cmds = append(cmds, test.stopwatch.Stop())
 
-		if test.currIter == len(test.iterations)-1 {
+		if test.currIter == len(test.iterations)-1 || test.TimeElapsed() > m.timeCap {
 			// all iterations have been run
-			cmds = append(cmds, tryStartExecutors(m))
-			//cmds = append(cmds, test.stopwatch.Stop())
-			test.resolved = true
+			resolveTestCase(test)
 			if test.state != TestStateFailure {
 				test.state = TestStateSuccess
 			}
@@ -191,7 +219,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// run the next iteration
 			test.currIter++
 			test.iterations[test.currIter].startTime = time.Now()
-			cmds = append(cmds, runTestCase(m.makefileDir, *test))
+			cmds = append(cmds, runTestCase(m.context, m.makefileDir, *test))
 		}
 	case stopwatch.StartStopMsg:
 		for i := range m.testCases {
@@ -230,6 +258,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	if shouldExit {
+		m.cancelCtx()
 		cmds = append(cmds, delayCmd(time.Millisecond, tea.Quit))
 	}
 
@@ -316,26 +345,84 @@ func (m model) View() string {
 	return str
 }
 
-func main() {
-	var iterations int
-	var maxThreads int
-	flag.IntVar(&iterations, "n", 1, "number of iterations to execute")
-	flag.IntVar(&maxThreads, "threads", max(runtime.NumCPU()/4-1, 2), "maximum number of concurrent threads to use")
-	flag.Parse()
-	// get first argument as directory
-	dir := cmp.Or(flag.Arg(0), ".")
+type argumentConfig struct {
+	Iterations int      `clap:"--iterations,-n"`
+	TimeCap    float64  `clap:"--timecap,-c"`
+	MaxThreads int      `clap:"--threads,-T"`
+	ShowHelp   bool     `clap:"--help,-h"`
+	TestFiles  []string `clap:"trailing"`
+}
 
-	if maxThreads > runtime.NumCPU() {
-		maxThreads = runtime.NumCPU()
+func main() {
+	//var iterations int
+	//var timeCap int
+	//var maxThreads int
+	//flag.IntVar(&iterations, "n", 1, "number of iterations to execute")
+	//flag.IntVar(&timeCap, "timecap", max(runtime.NumCPU()/4-1, 2), "cap total execution time to n seconds (useful with -n)")
+	//flag.IntVar(&maxThreads, "threads", max(runtime.NumCPU()/4-1, 2), "maximum number of concurrent threads to use")
+	//flag.Parse()
+	// get first argument as directory
+
+	if len(os.Args) == 1 {
+		printHelp()
+		os.Exit(0)
 	}
-	if maxThreads < 1 {
-		fmt.Println(errorStyle.Render("Invalid number of threads"))
+
+	flags := &argumentConfig{
+		Iterations: 1,
+		MaxThreads: max(runtime.NumCPU()/4-1, 2),
+		TimeCap:    1000,
+	}
+
+	var results *clap.Results
+	var err error
+	if results, err = clap.Parse(os.Args, flags); err != nil {
+		fmt.Println(errorStyle.Render("Invalid arguments: " + err.Error()))
+		printHelp()
+		os.Exit(1)
+	}
+	if len(results.Ignored) > 1 {
+		ignored := results.Ignored[1:]
+		if len(ignored) == 1 {
+			fmt.Println(errorStyle.Render("Unknown argument: " + ignored[0]))
+		} else {
+			fmt.Println(errorStyle.Render("Unknown arguments: " + strings.Join(results.Ignored[1:], ", ")))
+		}
+		printHelp()
 		os.Exit(1)
 	}
 
-	p := tea.NewProgram(initialModel(dir, maxThreads, iterations))
+	if flags.ShowHelp {
+		printHelp()
+		os.Exit(0)
+	}
+
+	if flags.TestFiles == nil {
+		fmt.Println(errorStyle.Render("No test directory(s) or file(s) given to run."))
+		os.Exit(1)
+	}
+
+	if flags.MaxThreads > runtime.NumCPU() {
+		flags.MaxThreads = runtime.NumCPU()
+	}
+	if flags.MaxThreads < 1 {
+		fmt.Println(errorStyle.Render("Invalid number of threads."))
+		os.Exit(1)
+	}
+
+	p := tea.NewProgram(initialModel(flags.TestFiles, flags.MaxThreads, flags.Iterations, flags.TimeCap))
 	if _, err := p.Run(); err != nil {
 		fmt.Println(errorStyle.Render(err.Error()))
 		os.Exit(1)
 	}
+}
+
+func printHelp() {
+	fmt.Println("Usage: grunner [options] [test files/directories]")
+	fmt.Println("Runs test files in the given directories or files. Multiple directories or files can be given.")
+	fmt.Println("Options:")
+	fmt.Println("  -h, --help             show this help message")
+	fmt.Println("  -n, --iterations int   number of iterations to execute (default 1)")
+	fmt.Println("  -c, --timecap float    cap total execution time to n seconds (useful with -n) (default 1000)")
+	fmt.Println("  -T, --threads int      maximum number of concurrent threads to use (default max(CPUThreads/4-1, 2))")
 }

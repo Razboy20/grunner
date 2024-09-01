@@ -27,6 +27,7 @@ type testIteration struct {
 type testInfo struct {
 	id         int
 	name       string
+	running    bool
 	resolved   bool
 	iterations []testIteration
 	currIter   int
@@ -49,6 +50,14 @@ func (t testInfo) AverageTime() time.Duration {
 	} else {
 		return (time.Duration(int(total)/count) / time.Millisecond) * time.Millisecond
 	}
+}
+
+func (t testInfo) TimeElapsed() time.Duration {
+	var total time.Duration
+	for _, iteration := range t.iterations {
+		total += iteration.timeSpanned
+	}
+	return total
 }
 
 func (t testInfo) CountPassed() int {

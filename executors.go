@@ -2,17 +2,19 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"os/exec"
 	"strings"
+	"time"
 )
 
 type startBuildingTests struct{}
 type buildTestMsg []int
 
-func makeDependencies(dir string) tea.Cmd {
+func makeDependencies(ctx context.Context, dir string) tea.Cmd {
 	return func() tea.Msg {
 		//e := exec.Command("make", "clean")
 		//e.Dir = dir
@@ -21,8 +23,11 @@ func makeDependencies(dir string) tea.Cmd {
 		//	return errMsg{err: fmt.Errorf("make clean error: %w", err)}
 		//}
 
+		ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+
 		var output bytes.Buffer
-		e := exec.Command("make", "-C", "kernel")
+		e := exec.CommandContext(ctx, "make", "-C", "kernel")
 		e.Dir = dir
 		e.Stderr = &output
 		err := e.Run()
@@ -38,10 +43,13 @@ func makeDependencies(dir string) tea.Cmd {
 	}
 }
 
-func buildTestCase(dir string, testCase testInfo) tea.Cmd {
+func buildTestCase(ctx context.Context, dir string, testCase testInfo) tea.Cmd {
 	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+
 		// run `make {testInfo.name}.test` in the directory
-		e := exec.Command("make", testCase.name)
+		e := exec.CommandContext(ctx, "make", testCase.name)
 		e.Dir = dir
 		err := e.Run()
 		// pipe the output to the terminal
@@ -59,9 +67,12 @@ type testBuildErr struct {
 }
 type testBuildSuccess int
 
-func runTestCase(dir string, testCase testInfo) tea.Cmd {
+func runTestCase(ctx context.Context, dir string, testCase testInfo) tea.Cmd {
 	return func() tea.Msg {
-		e := exec.Command("make", "-s", fmt.Sprintf("%s.test", testCase.name))
+		ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+		defer cancel()
+
+		e := exec.CommandContext(ctx, "make", "-s", fmt.Sprintf("%s.test", testCase.name))
 		e.Dir = dir
 
 		var output bytes.Buffer
@@ -91,6 +102,12 @@ func tryStartExecutors(m model) tea.Cmd {
 		threadsLeft := m.maxThreads
 		var toStart []int
 
+		for _, test := range m.testCases {
+			if test.running {
+				threadsLeft--
+			}
+		}
+
 		for i := range m.testCases {
 			test := &m.testCases[i]
 			if test.state == TestStateWaiting {
@@ -102,6 +119,7 @@ func tryStartExecutors(m model) tea.Cmd {
 				break
 			}
 		}
+		// todo: parallelize iterations if nothing else to do
 
 		return buildTestMsg(toStart)
 	}

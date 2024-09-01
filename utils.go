@@ -5,37 +5,56 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"time"
 )
 
-func getTestFiles(dir string) ([]string, error) {
-	// check if the directory is actually a file
+var TEST_EXT = ".cc"
 
-	//if fileInfo, err := os.Stat(dir); err == nil {
-	//	fileInfo
-	//}
+/*
+ * Returns a slice of unique test files given from either given 1) directories or 2) files.
+ * 1) If a directory is given, searches within the directory for test files.
+ * 2) If a file is given, checks if the file exists and if it has a .cc extension (and will attempt to add if not), and adds that.
+ */
+func findTestFiles(args []string) ([]string, error) {
+	uniqueTests := make(map[string]bool)
 
-	// get all file names in the current directory
-	files, err := os.ReadDir(dir)
-	if err != nil {
-		return nil, err
+	for _, arg := range args {
+		fileInfo, err := os.Stat(arg)
+		if err == nil && fileInfo.IsDir() {
+			entries, err := os.ReadDir(arg)
+			if err != nil {
+				return nil, fmt.Errorf("error reading directory %s: %v", arg, err)
+			}
+			for _, entry := range entries {
+				if !entry.IsDir() && strings.HasSuffix(entry.Name(), TEST_EXT) {
+					uniqueTests[entry.Name()] = true
+				}
+			}
+		} else {
+			if strings.Contains(arg, ".") {
+				if _, err := os.Stat(arg); err == nil {
+					uniqueTests[filepath.Base(arg)] = true
+				}
+			} else {
+				ccFile := arg + TEST_EXT
+				if _, err := os.Stat(ccFile); err == nil {
+					uniqueTests[filepath.Base(ccFile)] = true
+				} else if _, err := os.Stat(arg); err == nil {
+					uniqueTests[filepath.Base(arg)] = true
+				}
+			}
+		}
 	}
 
-	// filter to those that end with .cc
-	var testFiles []string
-	for _, file := range files {
-		if file.IsDir() {
-			continue
-		}
-		if len(file.Name()) < 3 {
-			continue
-		}
-		if file.Name()[len(file.Name())-3:] == ".cc" {
-			testFiles = append(testFiles, file.Name())
-		}
+	result := make([]string, 0, len(uniqueTests))
+	for file := range uniqueTests {
+		result = append(result, file)
 	}
 
-	return testFiles, nil
+	sort.Strings(result)
+	return result, nil
 }
 
 /**
