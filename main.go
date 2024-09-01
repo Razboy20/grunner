@@ -103,9 +103,6 @@ func initialModel(files []string, maxThreads, iterations int, timeCap float64) m
 
 	ctx, cancel := context.WithCancel(context.Background())
 
-	fmt.Println("timecaporig:", timeCap)
-	fmt.Println("timecap:", time.Duration(timeCap)*time.Second)
-
 	return model{
 		spinner:      s,
 		smallSpinner: s2,
@@ -425,4 +422,5 @@ func printHelp() {
 	fmt.Println("  -n, --iterations int   number of iterations to execute (default 1)")
 	fmt.Println("  -c, --timecap float    cap total execution time to n seconds (useful with -n) (default 1000)")
 	fmt.Println("  -T, --threads int      maximum number of concurrent threads to use (default max(CPUThreads/4-1, 2))")
+	fmt.Println("(gRunner version 1.2.0)")
 }
