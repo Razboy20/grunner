@@ -325,12 +325,13 @@ func (m model) View() string {
 
 	yPadding := 5
 	if height := len(testLines); height > m.window.height-yPadding {
-		columns := height/(m.window.height-yPadding) + 1
+		maxLines := m.window.height - yPadding
+		columns := (len(testLines) + maxLines - 1) / maxLines
+		columnLines := (len(testLines) + 1) / columns
 		// split the test cases into columns
-		columnHeight := height / columns
 		columnsStrMatrix := make([][]string, columns)
 		for i := 0; i < columns; i++ {
-			columnsStrMatrix[i] = testLines[i*columnHeight : min((i+1)*columnHeight, len(testLines)-1)]
+			columnsStrMatrix[i] = testLines[i*columnLines : min((i+1)*columnLines, len(testLines)-1)]
 		}
 
 		// join the columns
@@ -432,5 +433,5 @@ func printHelp() {
 	fmt.Println("  -n, --iterations int   number of iterations to execute (default 1)")
 	fmt.Println("  -c, --timecap float    cap total execution time to n seconds (useful with -n) (default 1000)")
 	fmt.Println("  -T, --threads int      maximum number of concurrent threads to use (default max(CPUThreads/4-1, 2))")
-	fmt.Println("(gRunner version 1.2.1)")
+	fmt.Println("(gRunner version 1.2.2)")
 }
