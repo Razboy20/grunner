@@ -12,15 +12,22 @@ import (
 
 var TEST_EXT = ".cc"
 
+type testFile = struct {
+	filePath string
+	testName string
+}
+
 /*
  * Returns a slice of unique test files given from either given 1) directories or 2) files.
  * 1) If a directory is given, searches within the directory for test files.
  * 2) If a file is given, checks if the file exists and if it has a .cc extension (and will attempt to add if not), and adds that.
  */
-func findTestFiles(args []string) ([]string, error) {
-	uniqueTests := make(map[string]bool)
+func findTestFiles(args []string) ([]testFile, error) {
+	uniqueTests := make(map[string]string)
 
 	for _, arg := range args {
+		arg = strings.TrimSpace(arg)
+
 		fileInfo, err := os.Stat(arg)
 		if err == nil && fileInfo.IsDir() {
 			entries, err := os.ReadDir(arg)
@@ -29,31 +36,39 @@ func findTestFiles(args []string) ([]string, error) {
 			}
 			for _, entry := range entries {
 				if !entry.IsDir() && strings.HasSuffix(entry.Name(), TEST_EXT) {
-					uniqueTests[entry.Name()] = true
+					uniqueTests[entry.Name()] = filepath.Join(arg, entry.Name())
 				}
 			}
 		} else {
 			if strings.Contains(arg, ".") {
 				if _, err := os.Stat(arg); err == nil {
-					uniqueTests[filepath.Base(arg)] = true
+					uniqueTests[filepath.Base(arg)] = arg
 				}
 			} else {
 				ccFile := arg + TEST_EXT
 				if _, err := os.Stat(ccFile); err == nil {
-					uniqueTests[filepath.Base(ccFile)] = true
+					uniqueTests[filepath.Base(ccFile)] = ccFile
 				} else if _, err := os.Stat(arg); err == nil {
-					uniqueTests[filepath.Base(arg)] = true
+					uniqueTests[filepath.Base(arg)] = arg
 				}
 			}
 		}
 	}
 
-	result := make([]string, 0, len(uniqueTests))
+	result := make([]testFile, 0, len(uniqueTests))
 	for file := range uniqueTests {
-		result = append(result, file)
+		if strings.HasSuffix(file, TEST_EXT) {
+			result = append(result, testFile{
+				filePath: uniqueTests[file],
+				testName: strings.TrimSuffix(file, TEST_EXT),
+			})
+		}
 	}
 
-	sort.Strings(result)
+	sort.Slice(result, func(i, j int) bool {
+		return strings.Compare(result[i].testName, result[j].testName) < 0
+	})
+
 	return result, nil
 }
 

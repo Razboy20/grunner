@@ -53,6 +53,9 @@ var (
 	testStyle    lipgloss.Style
 )
 
+// Version embedded in makefile
+var Version string
+
 func initialModel(files []string, maxThreads, iterations int, timeCap float64) model {
 	s := spinner.New()
 	s.Spinner = spinner.MiniDot
@@ -86,7 +89,7 @@ func initialModel(files []string, maxThreads, iterations int, timeCap float64) m
 	}
 
 	// assumption is that any tests to run would be within the same Makefile project
-	dir := filepath.Dir(testFiles[0])
+	dir := filepath.Dir(testFiles[0].filePath)
 	makefile, err := findMakefile(dir)
 	if err != nil {
 		model.err = err
@@ -95,10 +98,9 @@ func initialModel(files []string, maxThreads, iterations int, timeCap float64) m
 
 	var testCases []testInfo
 	var longestName int
-	for i, file := range testFiles {
-		file = file[:len(file)-len(TEST_EXT)]
-		if len(file) > longestName {
-			longestName = len(file)
+	for i, testFile := range testFiles {
+		if len(testFile.testName) > longestName {
+			longestName = len(testFile.testName)
 		}
 
 		tIterations := make([]testIteration, iterations)
@@ -106,8 +108,10 @@ func initialModel(files []string, maxThreads, iterations int, timeCap float64) m
 			tIterations[i] = testIteration{passed: false, timeSpanned: 0}
 		}
 
-		testCases = append(testCases, testInfo{id: i,
-			name:       file,
+		testCases = append(testCases, testInfo{
+			id:         i,
+			name:       testFile.testName,
+			filePath:   testFile.filePath,
 			resolved:   false,
 			running:    false,
 			state:      TestStateWaiting,
@@ -195,7 +199,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		test.iterations[test.currIter].timeSpanned = timeDiff(test.iterations[test.currIter].startTime, currTime)
 		cmds = append(cmds, test.stopwatch.Stop())
 
-		if test.currIter == len(test.iterations)-1 || test.TimeElapsed() > m.timeCap {
+		if true || test.currIter == len(test.iterations)-1 || (m.timeCap > 0 && test.TimeElapsed() > m.timeCap) {
 			// all iterations have been run
 			resolveTestCase(test)
 			test.err = msg.err
@@ -204,7 +208,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// run the next iteration
 			test.currIter++
 			test.iterations[test.currIter].startTime = time.Now()
-			cmds = append(cmds, runTestCase(m.context, m.makefileDir, *test))
+			//cmds = append(cmds, runTestCase(m.context, m.makefileDir, *test))
 		}
 	case testRunSuccess:
 		test := &m.testCases[msg]
@@ -214,7 +218,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		test.iterations[test.currIter].timeSpanned = timeDiff(test.iterations[test.currIter].startTime, currTime)
 		cmds = append(cmds, test.stopwatch.Stop())
 
-		if test.currIter == len(test.iterations)-1 || test.TimeElapsed() > m.timeCap {
+		if test.currIter == len(test.iterations)-1 || (m.timeCap > 0 && test.TimeElapsed() > m.timeCap) {
 			// all iterations have been run
 			resolveTestCase(test)
 			if test.state != TestStateFailure {
@@ -360,15 +364,6 @@ type argumentConfig struct {
 }
 
 func main() {
-	//var iterations int
-	//var timeCap int
-	//var maxThreads int
-	//flag.IntVar(&iterations, "n", 1, "number of iterations to execute")
-	//flag.IntVar(&timeCap, "timecap", max(runtime.NumCPU()/4-1, 2), "cap total execution time to n seconds (useful with -n)")
-	//flag.IntVar(&maxThreads, "threads", max(runtime.NumCPU()/4-1, 2), "maximum number of concurrent threads to use")
-	//flag.Parse()
-	// get first argument as directory
-
 	if len(os.Args) == 1 {
 		printHelp()
 		os.Exit(0)
@@ -377,7 +372,7 @@ func main() {
 	flags := &argumentConfig{
 		Iterations: 1,
 		MaxThreads: max(runtime.NumCPU()/4-1, 2),
-		TimeCap:    1000,
+		TimeCap:    -1,
 	}
 
 	var results *clap.Results
@@ -409,8 +404,8 @@ func main() {
 	}
 
 	if flags.MaxThreads > runtime.NumCPU() {
-		fmt.Println(errorStyle.Render("WARNING: Number of threads is higher than the number of CPUs. Setting to max CPUs."))
-		flags.MaxThreads = runtime.NumCPU()
+		//fmt.Println(errorStyle.Render("WARNING: Number of threads is higher than the number of CPUs. Setting to max CPUs."))
+		//flags.MaxThreads = runtime.NumCPU()
 	} else if flags.MaxThreads > runtime.NumCPU()/4 {
 		fmt.Println(errorStyle.Render("WARNING: Number of threads is higher than recommended. You may experience issues."))
 	} else if flags.MaxThreads < 1 {
@@ -426,12 +421,12 @@ func main() {
 }
 
 func printHelp() {
-	fmt.Println("Usage: grunner [options] [test files/directories]")
+	fmt.Println("Usage: grunner [options] [... test files/directories")
 	fmt.Println("Runs test files in the given directories or files. Multiple directories or files can be given.")
 	fmt.Println("Options:")
 	fmt.Println("  -h, --help             show this help message")
 	fmt.Println("  -n, --iterations int   number of iterations to execute (default 1)")
-	fmt.Println("  -c, --timecap float    cap total execution time to n seconds (useful with -n) (default 1000)")
+	fmt.Println("  -c, --timecap float    cap total execution time to n seconds (useful with -n) (default unlimited)")
 	fmt.Println("  -T, --threads int      maximum number of concurrent threads to use (default max(CPUThreads/4-1, 2))")
-	fmt.Println("(gRunner version 1.2.2)")
+	fmt.Printf("(gRunner version %s)\n", strings.TrimSpace(Version))
 }

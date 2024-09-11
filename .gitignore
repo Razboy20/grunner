@@ -50,5 +50,8 @@ Temporary Items
 .apdisk
 
 /.idea/
+bin/
+build/
 grunner.iml
-grunner
+VERSION.txt
+.env

@@ -25,8 +25,10 @@ type testIteration struct {
 }
 
 type testInfo struct {
-	id         int
-	name       string
+	id       int
+	name     string
+	filePath string
+
 	running    bool
 	resolved   bool
 	iterations []testIteration
@@ -101,6 +103,7 @@ func (t testInfo) View(m model) string {
 	case TestStateFailure:
 		icon = lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Render("✘")
 		statusText = lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Bold(true).Render("failed!")
+		tError = t.err.Error() // todo: make configurable flag
 	case TestStateCompileFailure:
 		icon = lipgloss.NewStyle().Foreground(lipgloss.Color("3")).Render("-")
 		return fmt.Sprintf("%s \x1b[37m%s did not compile.\x1b[0m %s\n", icon, testStyle.Render(t.name), grayStyle.Render(tError))
