@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	tea "github.com/charmbracelet/bubbletea"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -106,4 +108,63 @@ func timeDiff(a, b time.Time) time.Duration {
 		return a.Sub(b)
 	}
 	return b.Sub(a)
+}
+
+// count the number of other users on the same machine, either with a tty or ssh instance
+func countOtherUsers() (int, error) {
+	cmd := exec.Command("who")
+	output, err := cmd.Output()
+	if err != nil {
+		return 0, fmt.Errorf("error executing 'who' command: %v", err)
+	}
+
+	activeUsers := make(map[string]bool)
+	scanner := bufio.NewScanner(strings.NewReader(string(output)))
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		fields := strings.Fields(line)
+
+		if len(fields) >= 2 {
+			username := fields[0]
+			ttyOrPts := fields[1]
+
+			if strings.HasPrefix(ttyOrPts, "tty") || strings.HasPrefix(ttyOrPts, "pts") {
+				activeUsers[username] = true
+			}
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return 0, fmt.Errorf("error scanning 'who' output: %v", err)
+	}
+
+	// Check for code server instances
+	cmd = exec.Command("ps", "aux")
+	output, err = cmd.Output()
+	if err != nil {
+		return 0, fmt.Errorf("error executing 'ps aux' command: %v", err)
+	}
+
+	scanner = bufio.NewScanner(strings.NewReader(string(output)))
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.Contains(line, "sshd:") {
+			fields := strings.Fields(line)
+			if len(fields) > 0 {
+				username := fields[0]
+				activeUsers[username] = true
+			}
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return 0, fmt.Errorf("error scanning 'ps aux' output: %v", err)
+	}
+
+	// ignore root and the current user
+	delete(activeUsers, "root")
+	delete(activeUsers, os.Getenv("USER"))
+
+	return len(activeUsers), nil
 }

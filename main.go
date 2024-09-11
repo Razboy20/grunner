@@ -1,8 +1,5 @@
 package main
 
-// A simple program demonstrating the spinner component from the Bubbles
-// component library.
-
 import (
 	"context"
 	"fmt"
@@ -29,8 +26,12 @@ type model struct {
 	testCases    []testInfo
 
 	// settings
-	maxThreads  int
-	timeCap     time.Duration
+	maxThreads       int
+	timeCap          time.Duration
+	iterationTimeout time.Duration
+	earlyExit        bool
+	verbose          bool
+
 	makefileDir string
 	directory   string
 
@@ -55,8 +56,9 @@ var (
 
 // Version embedded in makefile
 var Version string
+var IsEdge = strings.Contains(os.Args[0], "edge")
 
-func initialModel(files []string, maxThreads, iterations int, timeCap float64) model {
+func initialModel(flags *argumentConfig) model {
 	s := spinner.New()
 	s.Spinner = spinner.MiniDot
 	s.Style = spinnerStyle
@@ -70,15 +72,18 @@ func initialModel(files []string, maxThreads, iterations int, timeCap float64) m
 		spinner:      s,
 		smallSpinner: s2,
 
-		maxThreads: maxThreads,
-		timeCap:    time.Duration(timeCap) * time.Second,
+		maxThreads:       flags.MaxThreads,
+		timeCap:          time.Duration(flags.TimeCap) * time.Second,
+		iterationTimeout: time.Duration(flags.Timeout) * time.Second,
+		earlyExit:        flags.EarlyExit,
+		verbose:          flags.Verbose,
 
 		context:   ctx,
 		cancelCtx: cancel,
 		window:    struct{ width, height int }{80, 24}, // set some defaults
 	}
 
-	testFiles, err := findTestFiles(files)
+	testFiles, err := findTestFiles(flags.TestFiles)
 	if err != nil {
 		model.err = err
 		return model
@@ -103,7 +108,7 @@ func initialModel(files []string, maxThreads, iterations int, timeCap float64) m
 			longestName = len(testFile.testName)
 		}
 
-		tIterations := make([]testIteration, iterations)
+		tIterations := make([]testIteration, flags.Iterations)
 		for i := range tIterations {
 			tIterations[i] = testIteration{passed: false, timeSpanned: 0}
 		}
@@ -125,6 +130,10 @@ func initialModel(files []string, maxThreads, iterations int, timeCap float64) m
 	model.testCases = testCases
 	model.makefileDir = filepath.Dir(makefile)
 	model.directory = dir
+
+	if len(testCases) == 1 {
+		model.verbose = true
+	}
 
 	return model
 }
@@ -188,7 +197,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		test.state = TestStateRunning
 		test.iterations[test.currIter].startTime = time.Now()
 		cmds = append(cmds, test.stopwatch.Start())
-		cmds = append(cmds, runTestCase(m.context, m.makefileDir, *test))
+		cmds = append(cmds, runTestCase(&m, *test))
 
 	case testRunError:
 		test := &m.testCases[msg.int]
@@ -199,16 +208,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		test.iterations[test.currIter].timeSpanned = timeDiff(test.iterations[test.currIter].startTime, currTime)
 		cmds = append(cmds, test.stopwatch.Stop())
 
-		if true || test.currIter == len(test.iterations)-1 || (m.timeCap > 0 && test.TimeElapsed() > m.timeCap) {
+		test.err = msg.err
+		if m.earlyExit || test.currIter == len(test.iterations)-1 || (m.timeCap > 0 && test.TimeElapsed() > m.timeCap) {
 			// all iterations have been run
 			resolveTestCase(test)
-			test.err = msg.err
-			//cmds = append(cmds, test.stopwatch.Stop())
 		} else {
 			// run the next iteration
 			test.currIter++
 			test.iterations[test.currIter].startTime = time.Now()
-			//cmds = append(cmds, runTestCase(m.context, m.makefileDir, *test))
+			cmds = append(cmds, runTestCase(&m, *test))
 		}
 	case testRunSuccess:
 		test := &m.testCases[msg]
@@ -228,7 +236,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// run the next iteration
 			test.currIter++
 			test.iterations[test.currIter].startTime = time.Now()
-			cmds = append(cmds, runTestCase(m.context, m.makefileDir, *test))
+			cmds = append(cmds, runTestCase(&m, *test))
 		}
 	case stopwatch.StartStopMsg:
 		for i := range m.testCases {
@@ -357,9 +365,12 @@ func (m model) View() string {
 
 type argumentConfig struct {
 	Iterations int      `clap:"--iterations,-n"`
-	TimeCap    float64  `clap:"--timecap,-c"`
 	MaxThreads int      `clap:"--threads,-T"`
+	EarlyExit  bool     `clap:"--earlyexit,-e"`
+	TimeCap    float64  `clap:"--timecap,-c"`
+	Timeout    int      `clap:"--timeout,-t"`
 	ShowHelp   bool     `clap:"--help,-h"`
+	Verbose    bool     `clap:"--verbose,-v"`
 	TestFiles  []string `clap:"trailing"`
 }
 
@@ -371,8 +382,11 @@ func main() {
 
 	flags := &argumentConfig{
 		Iterations: 1,
-		MaxThreads: max(runtime.NumCPU()/4-1, 2),
+		EarlyExit:  false, // todo: figure out if a boolean flag can be set to false with clap
+		MaxThreads: runtime.NumCPU() / 4,
 		TimeCap:    -1,
+		Timeout:    10,
+		Verbose:    IsEdge,
 	}
 
 	var results *clap.Results
@@ -403,17 +417,24 @@ func main() {
 		os.Exit(1)
 	}
 
-	if flags.MaxThreads > runtime.NumCPU() {
-		//fmt.Println(errorStyle.Render("WARNING: Number of threads is higher than the number of CPUs. Setting to max CPUs."))
-		//flags.MaxThreads = runtime.NumCPU()
-	} else if flags.MaxThreads > runtime.NumCPU()/4 {
-		fmt.Println(errorStyle.Render("WARNING: Number of threads is higher than recommended. You may experience issues."))
+	if flags.MaxThreads > runtime.NumCPU()/4 {
+		userCount, err := countOtherUsers()
+		// if we can't get the user count, just ignore it
+		if err == nil {
+			if userCount > 0 {
+				pluralUsers := ""
+				if userCount > 1 {
+					pluralUsers = "s"
+				}
+				fmt.Println(errorStyle.Render(fmt.Sprintf("WARNING: May incur high CPU usage, be mindful of the %d other user%s on the system.", userCount, pluralUsers)))
+			}
+		}
 	} else if flags.MaxThreads < 1 {
 		fmt.Println(errorStyle.Render("Invalid number of threads."))
 		os.Exit(1)
 	}
 
-	p := tea.NewProgram(initialModel(flags.TestFiles, flags.MaxThreads, flags.Iterations, flags.TimeCap))
+	p := tea.NewProgram(initialModel(flags))
 	if _, err := p.Run(); err != nil {
 		fmt.Println(errorStyle.Render(err.Error()))
 		os.Exit(1)
@@ -421,12 +442,15 @@ func main() {
 }
 
 func printHelp() {
-	fmt.Println("Usage: grunner [options] [... test files/directories")
+	fmt.Println("Usage: grunner [options] [... test files/directories]")
 	fmt.Println("Runs test files in the given directories or files. Multiple directories or files can be given.")
-	fmt.Println("Options:")
+	fmt.Println("\nOptions:")
 	fmt.Println("  -h, --help             show this help message")
 	fmt.Println("  -n, --iterations int   number of iterations to execute (default 1)")
+	fmt.Println("  -T, --threads int      maximum number of concurrent threads to use (default CPUThreads/4)")
+	fmt.Println("  -e, --earlyexit        exit iterating early if a test fails")
+	fmt.Println("  -t, --timeout int      max time an iteration will run until being killed (default 10)")
 	fmt.Println("  -c, --timecap float    cap total execution time to n seconds (useful with -n) (default unlimited)")
-	fmt.Println("  -T, --threads int      maximum number of concurrent threads to use (default max(CPUThreads/4-1, 2))")
+	fmt.Println("  -v, --verbose          show error information for test failures")
 	fmt.Printf("(gRunner version %s)\n", strings.TrimSpace(Version))
 }

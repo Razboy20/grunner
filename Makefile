@@ -37,7 +37,7 @@ clean:
 GO_FILES := $(shell find . -name '*.go')
 
 $(OUT_FILE) : $(GO_FILES)
-	go build -o $(OUT_FILE) -ldflags "-X 'main.Version=$(VERSION)' -X executors.QemuPath='$(QEMU_PATH)'"
+	go build -o $(OUT_FILE) -ldflags "-X 'main.Version=$(VERSION)' -X main.QemuPath=$(QEMU_PATH)"
 
 build : $(OUT_FILE)
 

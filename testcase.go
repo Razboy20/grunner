@@ -103,7 +103,9 @@ func (t testInfo) View(m model) string {
 	case TestStateFailure:
 		icon = lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Render("✘")
 		statusText = lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Bold(true).Render("failed!")
-		tError = t.err.Error() // todo: make configurable flag
+		if t.err != nil {
+			tError = t.err.Error()
+		}
 	case TestStateCompileFailure:
 		icon = lipgloss.NewStyle().Foreground(lipgloss.Color("3")).Render("-")
 		return fmt.Sprintf("%s \x1b[37m%s did not compile.\x1b[0m %s\n", icon, testStyle.Render(t.name), grayStyle.Render(tError))
@@ -111,6 +113,11 @@ func (t testInfo) View(m model) string {
 
 	if !t.resolved {
 		icon = m.spinner.View()
+	}
+
+	// only show errors if verbose mode is enabled
+	if !m.verbose {
+		tError = ""
 	}
 
 	if showMoreInfo {

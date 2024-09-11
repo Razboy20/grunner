@@ -75,38 +75,21 @@ const ansi = "[\u001B\u009B][[\\]()#;?]*(?:(?:(?:[a-zA-Z\\d]*(?:;[a-zA-Z\\d]*)*)
 
 var ansiRe = regexp.MustCompile(ansi)
 
-func runTestCase(ctx context.Context, dir string, testCase testInfo) tea.Cmd {
+func runTestCase(m *model, testCase testInfo) tea.Cmd {
+	dir := m.makefileDir
+	ctx := m.context
+
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		ctx, cancel := context.WithTimeout(ctx, m.iterationTimeout)
 		defer cancel()
 
-		//tempImageFile, _ := os.CreateTemp("", testCase.name+".img")
-		//defer func(name string) {
-		//	err := os.Remove(name)
-		//	if err != nil {
-		//		log.Printf("failed to remove temp %s: %s", name, err)
-		//	}
-		//}(tempImageFile.Name())
-		//
-		//// copy the image to the temp file
-		//imageFile, err := os.Open(filepath.Join(dir, "kernel/build/", testCase.name+".img"))
-		//if err != nil {
-		//	return testRunError{testCase.id, errMsg{err: fmt.Errorf("failed to open image: %w", err)}}
-		//}
-		//_, err = io.Copy(tempImageFile, imageFile)
-		//if err != nil {
-		//	return testRunError{testCase.id, errMsg{err: fmt.Errorf("failed to copy image: %w", err)}}
-		//}
-		//err = tempImageFile.Close()
-		//if err != nil {
-		//	return testRunError{testCase.id, errMsg{err: fmt.Errorf("failed to close temp image: %w", err)}}
-		//}
-
-		//qemuNumCores, qemuEnvProvided := os.LookupEnv("QEMU_SMP")
-		//qemuCmd := exec.CommandContext(ctx, "make", "-s", fmt.Sprintf("%s.test", testCase.name))
+		qemuNumCores, qemuEnvProvided := os.LookupEnv("QEMU_SMP")
+		if !qemuEnvProvided {
+			qemuNumCores = "4"
+		}
 
 		imageFile := filepath.Join(dir, "kernel/build/", testCase.name+".img")
-		qemuArgs := fmt.Sprintf("-accel tcg,thread=multi -cpu max -smp 4 -m 128m -no-reboot -nographic --monitor none -drive file=%s,index=0,media=disk,format=file,locking=off -device isa-debug-exit,iobase=0xf4,iosize=0x04", imageFile)
+		qemuArgs := fmt.Sprintf("-accel tcg,thread=multi -cpu max -smp %s -m 128m -no-reboot -nographic --monitor none -drive file=%s,index=0,media=disk,format=file,locking=off -device isa-debug-exit,iobase=0xf4,iosize=0x04", qemuNumCores, imageFile)
 		qemuCmd := exec.CommandContext(ctx, QemuPath, strings.Fields(qemuArgs)...)
 		qemuCmd.Dir = dir
 
@@ -119,6 +102,7 @@ func runTestCase(ctx context.Context, dir string, testCase testInfo) tea.Cmd {
 		if err != nil {
 			return testRunError{testCase.id, errMsg{err: fmt.Errorf("failed to create raw file: %w", err)}}
 		}
+		defer rawFile.Close()
 
 		stdoutPipe, _ := qemuCmd.StdoutPipe()
 		err = qemuCmd.Start()
@@ -132,9 +116,6 @@ func runTestCase(ctx context.Context, dir string, testCase testInfo) tea.Cmd {
 
 		err = qemuCmd.Wait()
 
-		//_ = os.WriteFile(fmt.Sprintf("%s.raw", testCase.name), output.Bytes(), 0644)
-		// read file
-		//rawOutput, _ := os.ReadFile(fmt.Sprintf("%s.raw", testCase.name))
 		// keep only the lines that start with ***
 		lines := strings.Split(output.String(), "\n")
 		var newOutput string
@@ -145,7 +126,7 @@ func runTestCase(ctx context.Context, dir string, testCase testInfo) tea.Cmd {
 			}
 		}
 
-		// write the new output back to the file
+		// write the filtered output
 		_ = os.WriteFile(fmt.Sprintf("%s.out", testCase.name), []byte(newOutput), 0644)
 
 		if err := ctx.Err(); err != nil {
@@ -166,7 +147,6 @@ func runTestCase(ctx context.Context, dir string, testCase testInfo) tea.Cmd {
 		// run diff between the output and the .ok file
 		var diffOut bytes.Buffer
 		diffArgs := fmt.Sprintf("-wBb --color=always - %s", strings.TrimSuffix(testCase.filePath, TEST_EXT)+".ok")
-		//return testRunError{testCase.id, errMsg{err: fmt.Errorf(strings.TrimSuffix(testCase.filePath, TEST_EXT) + ".ok")}}
 		d := exec.CommandContext(ctx, "diff", strings.Fields(diffArgs)...)
 		d.Dir = dir
 		d.Stdin = strings.NewReader(newOutput)
