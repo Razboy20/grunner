@@ -49,6 +49,9 @@ build/amd64 : $(OUT_FILE)
 run:
 	go run main.go
 
-deploy : build/amd64
+deploy : export GOOS=linux
+deploy : export GOARCH=amd64
+deploy : SUFFIX += linux
+deploy : $(OUT_FILE)
 	@echo "Deploying to $(DEPLOY_SSH_HOST)"
-	rsync $(OUT_FILE)-linux $(DEPLOY_SSH_HOST):$(DEPLOY_PATH)/$(BINARY)
+	rsync $(OUT_FILE) $(DEPLOY_SSH_HOST):$(DEPLOY_PATH)/$(subst -linux,$(EMPTY),$(BINARY))
