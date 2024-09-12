@@ -112,7 +112,13 @@ func runTestCase(m *model, testCase testInfo) tea.Cmd {
 		}
 
 		// stream the output to the .raw file
-		_, _ = io.Copy(io.MultiWriter(rawFile, &output), stdoutPipe)
+		rawLength, err := io.Copy(io.MultiWriter(rawFile, &output), stdoutPipe)
+		if err != nil {
+			return testRunError{testCase.id, errMsg{err: fmt.Errorf("failed to write .raw: %w", err)}}
+		}
+		if rawLength == 0 {
+			return testRunError{testCase.id, errMsg{err: fmt.Errorf("empty .raw file")}}
+		}
 
 		err = qemuCmd.Wait()
 
@@ -127,7 +133,10 @@ func runTestCase(m *model, testCase testInfo) tea.Cmd {
 		}
 
 		// write the filtered output
-		_ = os.WriteFile(fmt.Sprintf("%s.out", testCase.name), []byte(newOutput), 0644)
+		outErr := os.WriteFile(fmt.Sprintf("%s.out", testCase.name), []byte(newOutput), 0644)
+		if outErr != nil {
+			return testRunError{testCase.id, errMsg{err: fmt.Errorf("failed to write .out: %w", outErr)}}
+		}
 
 		if err := ctx.Err(); err != nil {
 			return testRunError{testCase.id, errMsg{err: fmt.Errorf("timed out")}}

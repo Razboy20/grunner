@@ -4,7 +4,7 @@ include .env
 
 B := bin
 BINARY = grunner$(subst $(SPACE),-,$(subst $(SPACE)$(SPACE),-,$(SUFFIX)))
-VERSION ?= 1.3.0
+VERSION ?= 1.3.1
 QEMU_PATH ?= qemu-system-i386
 
 EMPTY :=
@@ -51,4 +51,4 @@ run:
 
 deploy : build/amd64
 	@echo "Deploying to $(DEPLOY_SSH_HOST)"
-	rsync $(B)/$(BINARY)-linux $(DEPLOY_SSH_HOST):$(DEPLOY_PATH)/$(BINARY)
+	rsync $(OUT_FILE)-linux $(DEPLOY_SSH_HOST):$(DEPLOY_PATH)/$(BINARY)
