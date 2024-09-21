@@ -168,6 +168,11 @@ func runTestCase(m *model, testCase testInfo) tea.Cmd {
 			if err != nil {
 				return testRunError{testCase.id, errMsg{err: fmt.Errorf("failed to write diff: %w", err)}}
 			}
+
+			if strings.Contains(output.String(), "*** Missing code at") {
+				return testRunError{testCase.id, errMsg{err: fmt.Errorf("missing code")}}
+			}
+
 			return testRunError{testCase.id, errMsg{err: fmt.Errorf("diff found")}}
 		} else {
 			if testCase.resolved {

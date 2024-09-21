@@ -336,6 +336,12 @@ func (m model) View() string {
 	testStr := strings.Join(testLines, "")
 
 	yPadding := 5
+	columnWidth := 38
+
+	if m.verbose {
+		columnWidth += 2
+	}
+
 	if height := len(testLines); height > m.window.height-yPadding {
 		maxLines := m.window.height - yPadding
 		columns := (len(testLines) + maxLines - 1) / maxLines
@@ -349,7 +355,7 @@ func (m model) View() string {
 		// join the columns
 		var columnStrings []string
 		for _, column := range columnsStrMatrix {
-			columnStrings = append(columnStrings, lipgloss.NewStyle().Width(38).Render(strings.Join(column, "")))
+			columnStrings = append(columnStrings, lipgloss.NewStyle().Width(columnWidth).Render(strings.Join(column, "")))
 		}
 
 		str += lipgloss.JoinHorizontal(lipgloss.Top, columnStrings...)
