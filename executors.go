@@ -90,6 +90,9 @@ func runTestCase(m *model, testCase testInfo) tea.Cmd {
 
 		imageFile := filepath.Join(dir, "kernel/build/", testCase.name+".img")
 		qemuArgs := fmt.Sprintf("-accel tcg,thread=multi -cpu max -smp %s -m 128m -no-reboot -nographic --monitor none -drive file=%s,index=0,media=disk,format=file,locking=off -device isa-debug-exit,iobase=0xf4,iosize=0x04", qemuNumCores, imageFile)
+		if m.verbose {
+			qemuArgs += " -d guest_errors"
+		}
 		qemuCmd := exec.CommandContext(ctx, QemuPath, strings.Fields(qemuArgs)...)
 		qemuCmd.Dir = dir
 
