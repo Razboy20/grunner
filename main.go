@@ -383,9 +383,16 @@ type argumentConfig struct {
 }
 
 func main() {
+	var sentryEnvironment string
+	if IsEdge {
+		sentryEnvironment = "edge"
+	} else {
+		sentryEnvironment = "production"
+	}
 	err := sentry.Init(sentry.ClientOptions{
 		Dsn:              "https://b84a1ffbb51adf6e332cbca2922b2362@o4507745204895744.ingest.us.sentry.io/4508022556131328",
 		TracesSampleRate: 1.0,
+		Environment:      sentryEnvironment,
 	})
 	if err != nil {
 		log.Fatalf("sentry.Init: %s", err)

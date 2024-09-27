@@ -4,7 +4,7 @@ include .env
 
 B := bin
 BINARY = grunner$(subst $(SPACE),-,$(subst $(SPACE)$(SPACE),-,$(SUFFIX)))
-VERSION ?= 1.3.2
+VERSION ?= 1.3.3
 QEMU_PATH ?= qemu-system-i386
 
 EMPTY :=
@@ -48,6 +48,11 @@ build/amd64 : $(OUT_FILE)
 
 run:
 	go run main.go
+
+SENTRY_VERSION = $(shell sentry-cli releases propose-version)
+sentryrelease:
+	sentry-cli releases new -p grunner $(SENTRY_VERSION)
+	sentry-cli releases set-commits --auto $(SENTRY_VERSION)
 
 deploy : export GOOS=linux
 deploy : export GOARCH=amd64
