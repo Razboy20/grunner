@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"fmt"
+	"github.com/getsentry/sentry-go"
 	"grunner/stopwatch"
+	"log"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -381,6 +383,17 @@ type argumentConfig struct {
 }
 
 func main() {
+	err := sentry.Init(sentry.ClientOptions{
+		Dsn:              "https://b84a1ffbb51adf6e332cbca2922b2362@o4507745204895744.ingest.us.sentry.io/4508022556131328",
+		TracesSampleRate: 1.0,
+	})
+	if err != nil {
+		log.Fatalf("sentry.Init: %s", err)
+	}
+	// Flush buffered events before the program terminates.
+	// Set the timeout to the maximum duration the program can afford to wait.
+	defer sentry.Flush(2 * time.Second)
+
 	if len(os.Args) == 1 {
 		printHelp()
 		os.Exit(0)
@@ -396,7 +409,6 @@ func main() {
 	}
 
 	var results *clap.Results
-	var err error
 	if results, err = clap.Parse(os.Args, flags); err != nil {
 		fmt.Println(errorStyle.Render("Invalid arguments: " + err.Error()))
 		printHelp()
