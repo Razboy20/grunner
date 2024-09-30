@@ -168,3 +168,13 @@ func countOtherUsers() (int, error) {
 
 	return len(activeUsers), nil
 }
+
+func hashUser() string {
+	cmd := exec.Command("id", "-u")
+	output, err := cmd.Output()
+	if err != nil {
+		return "unknown"
+	}
+
+	return strings.TrimSpace(string(output))
+}

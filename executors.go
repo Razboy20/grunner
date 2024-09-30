@@ -7,6 +7,7 @@ import (
 	"fmt"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/getsentry/sentry-go"
 	"io"
 	"log"
 	"os"
@@ -25,6 +26,10 @@ type buildTestMsg []int
 
 func makeDependencies(ctx context.Context, dir string) tea.Cmd {
 	return func() tea.Msg {
+		span := sentry.StartSpan(ctx, "function")
+		span.Description = "makeDependencies"
+		defer span.Finish()
+
 		ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		defer cancel()
 
@@ -47,6 +52,10 @@ func makeDependencies(ctx context.Context, dir string) tea.Cmd {
 
 func buildTestCase(ctx context.Context, dir string, testCase testInfo) tea.Cmd {
 	return func() tea.Msg {
+		span := sentry.StartSpan(ctx, "function")
+		span.Description = fmt.Sprintf("build.%d", testCase.id)
+		defer span.Finish()
+
 		ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		defer cancel()
 
@@ -80,6 +89,10 @@ func runTestCase(m *model, testCase testInfo) tea.Cmd {
 	ctx := m.context
 
 	return func() tea.Msg {
+		span := sentry.StartSpan(ctx, "function")
+		span.Description = fmt.Sprintf("run.%d", testCase.id)
+		defer span.Finish()
+
 		ctx, cancel := context.WithTimeout(ctx, m.iterationTimeout)
 		defer cancel()
 
@@ -103,7 +116,9 @@ func runTestCase(m *model, testCase testInfo) tea.Cmd {
 
 		rawFile, err := os.Create(fmt.Sprintf("%s.raw", testCase.name))
 		if err != nil {
-			return testRunError{testCase.id, errMsg{err: fmt.Errorf("failed to create raw file: %w", err)}}
+			wrappedErr := fmt.Errorf("failed to create raw file: %w", err)
+			sentry.CaptureException(wrappedErr)
+			return testRunError{testCase.id, errMsg{err: wrappedErr}}
 		}
 		defer rawFile.Close()
 
@@ -111,13 +126,17 @@ func runTestCase(m *model, testCase testInfo) tea.Cmd {
 		err = qemuCmd.Start()
 
 		if err != nil {
-			return testRunError{testCase.id, errMsg{err: fmt.Errorf("failed to start qemu: %w", err)}}
+			wrappedErr := fmt.Errorf("failed to start qemu: %w", err)
+			sentry.CaptureException(wrappedErr)
+			return testRunError{testCase.id, errMsg{err: wrappedErr}}
 		}
 
 		// stream the output to the .raw file
 		rawLength, err := io.Copy(io.MultiWriter(rawFile, &output), stdoutPipe)
 		if err != nil {
-			return testRunError{testCase.id, errMsg{err: fmt.Errorf("failed to write .raw: %w", err)}}
+			wrappedErr := fmt.Errorf("failed to write .raw: %w", err)
+			sentry.CaptureException(wrappedErr)
+			return testRunError{testCase.id, errMsg{err: wrappedErr}}
 		}
 		if rawLength == 0 {
 			return testRunError{testCase.id, errMsg{err: fmt.Errorf("empty .raw file")}}
@@ -138,7 +157,9 @@ func runTestCase(m *model, testCase testInfo) tea.Cmd {
 		// write the filtered output
 		outErr := os.WriteFile(fmt.Sprintf("%s.out", testCase.name), []byte(newOutput), 0644)
 		if outErr != nil {
-			return testRunError{testCase.id, errMsg{err: fmt.Errorf("failed to write .out: %w", outErr)}}
+			wrappedErr := fmt.Errorf("failed to write .out: %w", outErr)
+			sentry.CaptureException(wrappedErr)
+			return testRunError{testCase.id, errMsg{err: wrappedErr}}
 		}
 
 		if err := ctx.Err(); err != nil {
@@ -148,12 +169,14 @@ func runTestCase(m *model, testCase testInfo) tea.Cmd {
 		var exitErr2 *exec.ExitError
 		if errors.As(err, &exitErr2) {
 			if exitErr2.ExitCode() != 1 {
-				return testRunError{testCase.id, errMsg{err: fmt.Errorf("qemu failed: %w, %s", err, stderr.String())}}
+				wrappedErr := fmt.Errorf("qemu failed: %w, %s", err, stderr.String())
+				sentry.CaptureException(wrappedErr)
+				return testRunError{testCase.id, errMsg{err: wrappedErr}}
 			}
 		}
 
 		if stderr.Len() > 0 {
-			return testRunError{testCase.id, errMsg{err: fmt.Errorf("qemu empty stdout: %w, %s", err, stderr.String())}}
+			return testRunError{testCase.id, errMsg{err: fmt.Errorf("qemu stderr: %w, %s", err, stderr.String())}}
 		}
 
 		// run diff between the output and the .ok file

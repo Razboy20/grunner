@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"github.com/getsentry/sentry-go"
 	"grunner/stopwatch"
 	"log"
 	"os"
@@ -16,6 +15,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/fred1268/go-clap/clap"
+	"github.com/getsentry/sentry-go"
 )
 
 type errMsg struct{ err error }
@@ -60,7 +60,7 @@ var (
 var Version string
 var IsEdge = strings.Contains(os.Args[0], "edge")
 
-func initialModel(flags *argumentConfig) model {
+func initialModel(ctx context.Context, flags *argumentConfig) model {
 	s := spinner.New()
 	s.Spinner = spinner.MiniDot
 	s.Style = spinnerStyle
@@ -68,7 +68,7 @@ func initialModel(flags *argumentConfig) model {
 	s2 := spinner.New()
 	s2.Spinner = spinner.Line
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(ctx)
 
 	model := model{
 		spinner:      s,
@@ -163,10 +163,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "q", "esc", "ctrl+c":
-			if m.quitting {
-				// forcibly quit
-				os.Exit(1)
-			}
 			m.quitting = true
 			m.cancelCtx()
 			return m, delayCmd(time.Millisecond, tea.Quit)
@@ -383,29 +379,37 @@ type argumentConfig struct {
 }
 
 func main() {
+	exitCode := 0
+	defer func() { os.Exit(exitCode) }()
 	var sentryEnvironment string
+	var sampleRate float64
 	if IsEdge {
+		sampleRate = 1.0
 		sentryEnvironment = "edge"
 	} else {
+		sampleRate = 0.1
 		sentryEnvironment = "production"
 	}
+
 	err := sentry.Init(sentry.ClientOptions{
 		Dsn:              "https://b84a1ffbb51adf6e332cbca2922b2362@o4507745204895744.ingest.us.sentry.io/4508022556131328",
 		EnableTracing:    true,
-		TracesSampleRate: 1.0,
+		Release:          Version,
+		AttachStacktrace: true,
+		TracesSampleRate: sampleRate,
 		Environment:      sentryEnvironment,
 	})
 	if err != nil {
 		log.Fatalf("sentry.Init: %s", err)
 	}
+
+	sentry.ConfigureScope(func(scope *sentry.Scope) {
+		scope.SetUser(sentry.User{Username: hashUser()})
+	})
+
 	// Flush buffered events before the program terminates.
 	// Set the timeout to the maximum duration the program can afford to wait.
 	defer sentry.Flush(2 * time.Second)
-
-	if len(os.Args) == 1 {
-		printHelp()
-		os.Exit(0)
-	}
 
 	flags := &argumentConfig{
 		Iterations: 1,
@@ -420,8 +424,15 @@ func main() {
 	if results, err = clap.Parse(os.Args, flags); err != nil {
 		fmt.Println(errorStyle.Render("Invalid arguments: " + err.Error()))
 		printHelp()
-		os.Exit(1)
+		exitCode = 1
+		return
 	}
+
+	if len(os.Args) == 1 || flags.ShowHelp {
+		printHelp()
+		return
+	}
+
 	if len(results.Ignored) > 1 {
 		ignored := results.Ignored[1:]
 		if len(ignored) == 1 {
@@ -430,17 +441,14 @@ func main() {
 			fmt.Println(errorStyle.Render("Unknown arguments: " + strings.Join(results.Ignored[1:], ", ")))
 		}
 		printHelp()
-		os.Exit(1)
-	}
-
-	if flags.ShowHelp {
-		printHelp()
-		os.Exit(0)
+		exitCode = 1
+		return
 	}
 
 	if flags.TestFiles == nil {
 		fmt.Println(errorStyle.Render("No test directory(s) or file(s) given to run."))
-		os.Exit(1)
+		exitCode = 1
+		return
 	}
 
 	if flags.MaxThreads > runtime.NumCPU()/4 {
@@ -457,13 +465,28 @@ func main() {
 		}
 	} else if flags.MaxThreads < 1 {
 		fmt.Println(errorStyle.Render("Invalid number of threads."))
-		os.Exit(1)
+		return
 	}
 
-	p := tea.NewProgram(initialModel(flags))
+	options := []sentry.SpanOption{
+		// Set the OP based on values from https://develop.sentry.dev/sdk/performance/span-operations/
+		sentry.WithOpName("app"),
+		sentry.WithTransactionName("testRun"),
+		sentry.WithDescription(fmt.Sprintf("Running %d test files", len(flags.TestFiles))),
+		sentry.WithTransactionSource(sentry.SourceCustom),
+	}
+
+	transaction := sentry.StartSpan(context.Background(), "run", options...)
+	defer transaction.Finish()
+
+	model := initialModel(transaction.Context(), flags)
+
+	p := tea.NewProgram(model)
+
 	if _, err := p.Run(); err != nil {
 		fmt.Println(errorStyle.Render(err.Error()))
-		os.Exit(1)
+		exitCode = 1
+		return
 	}
 }
 
