@@ -125,6 +125,10 @@ func runTestCase(m *model, testCase testInfo) tea.Cmd {
 		stdoutPipe, _ := qemuCmd.StdoutPipe()
 		err = qemuCmd.Start()
 
+		if err := ctx.Err(); err != nil {
+			return testRunError{testCase.id, errMsg{err: fmt.Errorf("qemu start timed out")}}
+		}
+
 		if err != nil {
 			wrappedErr := fmt.Errorf("failed to start qemu: %w", err)
 			sentry.CaptureException(wrappedErr)
