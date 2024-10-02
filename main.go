@@ -150,6 +150,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds []tea.Cmd
 	)
 
+	defer sentry.RecoverWithContext(m.context)
+
 	resolveTestCase := func(test *testInfo) {
 		test.resolved = true
 		test.running = false
@@ -284,6 +286,8 @@ func (m model) View() string {
 	if m.err != nil {
 		return errorStyle.Render("Error: " + m.err.Error() + "\n")
 	}
+
+	defer sentry.RecoverWithContext(m.context)
 
 	var isFinished bool
 	for _, testCase := range m.testCases {

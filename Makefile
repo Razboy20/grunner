@@ -4,7 +4,7 @@ include .env
 
 B := bin
 BINARY = grunner$(subst $(SPACE),-,$(subst $(SPACE)$(SPACE),-,$(SUFFIX)))
-VERSION ?= 1.3.4
+VERSION ?= 1.3.5
 QEMU_PATH ?= qemu-system-i386
 
 EMPTY :=

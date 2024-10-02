@@ -89,6 +89,8 @@ func runTestCase(m *model, testCase testInfo) tea.Cmd {
 	ctx := m.context
 
 	return func() tea.Msg {
+		defer sentry.RecoverWithContext(ctx)
+
 		span := sentry.StartSpan(ctx, "function")
 		span.Description = fmt.Sprintf("run.%d", testCase.id)
 		defer span.Finish()
