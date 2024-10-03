@@ -346,6 +346,11 @@ func (m model) View() string {
 
 	if height := len(testLines); height > m.window.height-yPadding {
 		maxLines := m.window.height - yPadding
+
+		if maxLines <= 0 {
+			return str
+		}
+
 		columns := (len(testLines) + maxLines - 1) / maxLines
 		columnLines := (len(testLines) + 1) / columns
 		// split the test cases into columns
