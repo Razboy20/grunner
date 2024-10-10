@@ -61,8 +61,17 @@ func buildTestCase(ctx context.Context, dir string, testCase testInfo) tea.Cmd {
 
 		_ = os.Remove(fmt.Sprintf("%s.diff", testCase.name))
 
-		// run `make {testInfo.name}.test` in the directory
-		e := exec.CommandContext(ctx, "make", testCase.name)
+		// todo: make less janky, and configurable per-project
+		// check if Makefile contains .data build steps
+		makefileData, _ := os.ReadFile(filepath.Join(dir, "Makefile"))
+
+		var e *exec.Cmd
+		if bytes.Contains(makefileData, []byte(".data")) {
+			e = exec.CommandContext(ctx, "make", testCase.name, testCase.name+".data")
+		} else {
+			e = exec.CommandContext(ctx, "make", testCase.name)
+		}
+
 		e.Dir = dir
 		err := e.Run()
 		// pipe the output to the terminal
@@ -108,6 +117,12 @@ func runTestCase(m *model, testCase testInfo) tea.Cmd {
 		if m.verbose {
 			qemuArgs += " -d guest_errors"
 		}
+		// check to see if test.data exists
+		dataFile := filepath.Join(dir, testCase.name+".data")
+		//return testRunError{testCase.id, errMsg{err: fmt.Errorf(dataFile)}}
+		if _, err := os.Stat(dataFile); err == nil {
+			qemuArgs += " -drive file=" + dataFile + ",index=1,media=disk,format=file,locking=off"
+		}
 		qemuCmd := exec.CommandContext(ctx, QemuPath, strings.Fields(qemuArgs)...)
 		qemuCmd.Dir = dir
 
@@ -145,7 +160,7 @@ func runTestCase(m *model, testCase testInfo) tea.Cmd {
 			return testRunError{testCase.id, errMsg{err: wrappedErr}}
 		}
 		if rawLength == 0 {
-			return testRunError{testCase.id, errMsg{err: fmt.Errorf("empty .raw file")}}
+			return testRunError{testCase.id, errMsg{err: fmt.Errorf(fmt.Sprintf("empty .raw file %s", stderr.String()))}}
 		}
 
 		err = qemuCmd.Wait()
