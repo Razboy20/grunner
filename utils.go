@@ -35,10 +35,10 @@ func findTestFiles(args []string) ([]testFile, error) {
 	for _, arg := range args {
 		arg = strings.TrimSpace(arg)
 
-		curDirEntries, err := os.ReadDir(".")
-		if err != nil {
-			return nil, fmt.Errorf("error reading current directory: %v", err)
-		}
+		//curDirEntries, err := os.ReadDir(".")
+		//if err != nil {
+		//	return nil, fmt.Errorf("error reading current directory: %v", err)
+		//}
 
 		fileInfo, err := os.Stat(arg)
 		if err == nil && fileInfo.IsDir() && !testExtRe.MatchString(fileInfo.Name()) {
@@ -57,8 +57,11 @@ func findTestFiles(args []string) ([]testFile, error) {
 					uniqueTests[trimTestExt(filepath.Base(arg))] = arg
 				}
 			} else {
-				for _, entry := range curDirEntries {
-					if strings.HasPrefix(entry.Name(), arg) && testExtRe.MatchString(entry.Name()) {
+				entries, _ := os.ReadDir(filepath.Dir(arg))
+
+				testName := filepath.Base(arg)
+				for _, entry := range entries {
+					if strings.HasPrefix(entry.Name(), testName) && testExtRe.MatchString(entry.Name()) {
 						uniqueTests[trimTestExt(entry.Name())] = entry.Name()
 					}
 				}
