@@ -26,6 +26,7 @@ type testFile = struct {
  * 2) If a file is given, checks if the file exists and if it has a .cc extension (and will attempt to add if not), and adds that.
  */
 func findTestFiles(args []string) ([]testFile, error) {
+	// map of test name to file path (.cc or .dir, etc.)
 	uniqueTests := make(map[string]string)
 
 	trimTestExt := func(file string) string {
@@ -41,6 +42,7 @@ func findTestFiles(args []string) ([]testFile, error) {
 		//}
 
 		fileInfo, err := os.Stat(arg)
+		// read files in given subdirectory (i.e. arg = tests/)
 		if err == nil && fileInfo.IsDir() && !testExtRe.MatchString(fileInfo.Name()) {
 			entries, err := os.ReadDir(arg)
 			if err != nil {
@@ -52,17 +54,19 @@ func findTestFiles(args []string) ([]testFile, error) {
 				}
 			}
 		} else {
+			// read file (i.e. arg = t0, t0.cc, tests/t0, ...)
 			if strings.Contains(arg, ".") {
+				// if the file exists, add it to the list
 				if _, err := os.Stat(arg); err == nil {
 					uniqueTests[trimTestExt(filepath.Base(arg))] = arg
 				}
 			} else {
+				// Else, infer the file extension
 				entries, _ := os.ReadDir(filepath.Dir(arg))
-
 				testName := filepath.Base(arg)
 				for _, entry := range entries {
 					if strings.HasPrefix(entry.Name(), testName) && testExtRe.MatchString(entry.Name()) {
-						uniqueTests[trimTestExt(entry.Name())] = entry.Name()
+						uniqueTests[trimTestExt(entry.Name())] = filepath.Join(filepath.Dir(arg) + entry.Name())
 					}
 				}
 			}

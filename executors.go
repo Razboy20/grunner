@@ -112,7 +112,14 @@ func runTestCase(m *model, testCase testInfo) tea.Cmd {
 			qemuNumCores = "4"
 		}
 
-		imageFile := filepath.Join(dir, "kernel/build/", testCase.name+".img")
+		var imageFile string
+		// p7+, set to kernel/build/kernel.img
+		if _, err := os.Stat(filepath.Join(dir, "kernel/build/kernel.img")); err == nil {
+			imageFile = filepath.Join(dir, "kernel/build/kernel.img")
+		} else {
+			imageFile = filepath.Join(dir, "kernel/build/", testCase.name+".img")
+		}
+
 		qemuArgs := fmt.Sprintf("-accel tcg,thread=multi -cpu max -smp %s -m 128m -no-reboot -nographic --monitor none -drive file=%s,index=0,media=disk,format=raw,file.locking=off -device isa-debug-exit,iobase=0xf4,iosize=0x04", qemuNumCores, imageFile)
 		if m.verbose {
 			qemuArgs += " -d guest_errors"
