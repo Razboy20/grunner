@@ -113,7 +113,7 @@ func runTestCase(m *model, testCase testInfo) tea.Cmd {
 		}
 
 		imageFile := filepath.Join(dir, "kernel/build/", testCase.name+".img")
-		qemuArgs := fmt.Sprintf("-accel tcg,thread=multi -cpu max -smp %s -m 128m -no-reboot -nographic --monitor none -drive file=%s,index=0,media=disk,format=file,locking=off -device isa-debug-exit,iobase=0xf4,iosize=0x04", qemuNumCores, imageFile)
+		qemuArgs := fmt.Sprintf("-accel tcg,thread=multi -cpu max -smp %s -m 128m -no-reboot -nographic --monitor none -drive file=%s,index=0,media=disk,format=raw,file.locking=off -device isa-debug-exit,iobase=0xf4,iosize=0x04", qemuNumCores, imageFile)
 		if m.verbose {
 			qemuArgs += " -d guest_errors"
 		}
@@ -202,7 +202,7 @@ func runTestCase(m *model, testCase testInfo) tea.Cmd {
 
 		// run diff between the output and the .ok file
 		var diffOut bytes.Buffer
-		diffArgs := fmt.Sprintf("-wBb --color=always - %s", strings.TrimSuffix(testCase.filePath, TEST_EXT)+".ok")
+		diffArgs := fmt.Sprintf("-wBb --color=always - %s", testExtRe.ReplaceAllString(testCase.filePath, ".ok"))
 		d := exec.CommandContext(ctx, "diff", strings.Fields(diffArgs)...)
 		d.Dir = dir
 		d.Stdin = strings.NewReader(newOutput)

@@ -7,12 +7,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
 )
 
-var TEST_EXT = ".cc"
+var testExtRe = regexp.MustCompile("\\.(cc|dir)$")
 
 type testFile = struct {
 	filePath string
@@ -27,31 +28,39 @@ type testFile = struct {
 func findTestFiles(args []string) ([]testFile, error) {
 	uniqueTests := make(map[string]string)
 
+	trimTestExt := func(file string) string {
+		return testExtRe.ReplaceAllString(file, "")
+	}
+
 	for _, arg := range args {
 		arg = strings.TrimSpace(arg)
 
+		curDirEntries, err := os.ReadDir(".")
+		if err != nil {
+			return nil, fmt.Errorf("error reading current directory: %v", err)
+		}
+
 		fileInfo, err := os.Stat(arg)
-		if err == nil && fileInfo.IsDir() {
+		if err == nil && fileInfo.IsDir() && !testExtRe.MatchString(fileInfo.Name()) {
 			entries, err := os.ReadDir(arg)
 			if err != nil {
 				return nil, fmt.Errorf("error reading directory %s: %v", arg, err)
 			}
 			for _, entry := range entries {
-				if !entry.IsDir() && strings.HasSuffix(entry.Name(), TEST_EXT) {
-					uniqueTests[entry.Name()] = filepath.Join(arg, entry.Name())
+				if testExtRe.MatchString(entry.Name()) {
+					uniqueTests[trimTestExt(entry.Name())] = filepath.Join(arg, entry.Name())
 				}
 			}
 		} else {
 			if strings.Contains(arg, ".") {
 				if _, err := os.Stat(arg); err == nil {
-					uniqueTests[filepath.Base(arg)] = arg
+					uniqueTests[trimTestExt(filepath.Base(arg))] = arg
 				}
 			} else {
-				ccFile := arg + TEST_EXT
-				if _, err := os.Stat(ccFile); err == nil {
-					uniqueTests[filepath.Base(ccFile)] = ccFile
-				} else if _, err := os.Stat(arg); err == nil {
-					uniqueTests[filepath.Base(arg)] = arg
+				for _, entry := range curDirEntries {
+					if strings.HasPrefix(entry.Name(), arg) && testExtRe.MatchString(entry.Name()) {
+						uniqueTests[trimTestExt(entry.Name())] = entry.Name()
+					}
 				}
 			}
 		}
@@ -59,12 +68,10 @@ func findTestFiles(args []string) ([]testFile, error) {
 
 	result := make([]testFile, 0, len(uniqueTests))
 	for file := range uniqueTests {
-		if strings.HasSuffix(file, TEST_EXT) {
-			result = append(result, testFile{
-				filePath: uniqueTests[file],
-				testName: strings.TrimSuffix(file, TEST_EXT),
-			})
-		}
+		result = append(result, testFile{
+			filePath: uniqueTests[file],
+			testName: file,
+		})
 	}
 
 	sort.Slice(result, func(i, j int) bool {
