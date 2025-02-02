@@ -356,7 +356,7 @@ func (m model) View() string {
 		// split the test cases into columns
 		columnsStrMatrix := make([][]string, columns)
 		for i := 0; i < columns; i++ {
-			columnsStrMatrix[i] = testLines[i*columnLines : min((i+1)*columnLines, len(testLines)-1)]
+			columnsStrMatrix[i] = testLines[i*columnLines : min((i+1)*columnLines, len(testLines))]
 		}
 
 		// join the columns
